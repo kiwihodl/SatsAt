@@ -8,6 +8,7 @@ import CoreData
 
 // MARK: - PSBT Manager
 
+@MainActor
 class PSBTManager: ObservableObject {
     static let shared = PSBTManager()
     
@@ -23,7 +24,9 @@ class PSBTManager: ObservableObject {
     private let groupManager = GroupManager.shared
     
     private var cancellables = Set<AnyCancellable>()
-    private let currentUserId = "default_user"
+    private var currentUserId: String {
+        return UserDefaults.standard.string(forKey: "currentUserId") ?? "default_user"
+    }
     
     private init() {
         setupObservers()
@@ -366,12 +369,8 @@ class PSBTManager: ObservableObject {
             identifier: psbt.id
         )
         
-        // Store or update encrypted PSBT data
-        let psbtData = EncryptedGroupData.fetchGroupData(
-            groupId: psbt.groupId,
-            dataType: "psbt",
-            context: context
-        ) ?? EncryptedGroupData()
+        // Store or update encrypted PSBT data - skip CoreData for MVP
+        let psbtData = EncryptedGroupData(context: context)
         
         // For MVP: Skip Core Data storage
         print("Storing PSBT for group \(psbt.groupId)")

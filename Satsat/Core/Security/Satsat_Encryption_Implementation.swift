@@ -55,6 +55,19 @@ class SatsatEncryptionManager: ObservableObject {
         }
     }
     
+    /// Create and store a new group encryption key (for group creators)
+    func createGroupMasterKey(for groupId: String) throws -> SymmetricKey {
+        // Generate new group master key
+        let newKey = SymmetricKey(size: .bits256)
+        let keyData = newKey.withUnsafeBytes { Data($0) }
+        
+        // Store the key in keychain
+        try keychain.store(data: keyData, for: "group_secrets_\(groupId)", requiresBiometrics: false)
+        
+        print("✅ Created new group encryption key for group: \(groupId)")
+        return newKey
+    }
+    
     /// Store group master key (when creating or joining group)
     func storeGroupMasterKey(_ key: SymmetricKey, for groupId: String) throws {
         let keyData = key.withUnsafeBytes { Data($0) }

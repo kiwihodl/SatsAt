@@ -9,6 +9,7 @@ import CryptoKit
 
 // MARK: - Message Manager Service
 
+@MainActor
 class MessageManager: ObservableObject {
     static let shared = MessageManager()
     
@@ -24,7 +25,9 @@ class MessageManager: ObservableObject {
     private let keychainManager = KeychainManager.shared
     
     private var cancellables = Set<AnyCancellable>()
-    private let currentUserId = "default_user"
+    private var currentUserId: String {
+        return UserDefaults.standard.string(forKey: "currentUserId") ?? "default_user"
+    }
     private let maxMessagesPerGroup = 500
     
     private init() {

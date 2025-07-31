@@ -181,9 +181,10 @@ struct ConnectionStatusCard: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
-                Text(nostrClient.isConnected ? "Connected" : "Connecting...")
+                Text(nostrClient.networkHealth.description)
                     .font(.subheadline)
                     .fontWeight(.medium)
+                    .foregroundColor(nostrClient.networkHealth.color)
             }
             
             Spacer()
@@ -379,17 +380,55 @@ struct WalletView: View {
             Divider()
                 .background(SatsatDesignSystem.Colors.backgroundTertiary)
             
-            // Balance display
-            VStack(spacing: SatsatDesignSystem.Spacing.sm) {
-                Text("Current Balance")
-                    .font(SatsatDesignSystem.Typography.caption)
-                    .foregroundColor(SatsatDesignSystem.Colors.textSecondary)
+            // Progress Circle (Cash App style)
+            HStack(spacing: SatsatDesignSystem.Spacing.lg) {
+                // Progress Circle
+                ZStack {
+                    Circle()
+                        .stroke(Color.gray.opacity(0.3), lineWidth: 8)
+                        .frame(width: 80, height: 80)
+                    
+                    Circle()
+                        .trim(from: 0, to: min(group.goalProgress, 1.0))
+                        .stroke(.blue, lineWidth: 8)
+                        .frame(width: 80, height: 80)
+                        .rotationEffect(.degrees(-90))
+                        .animation(.easeInOut(duration: 1.0), value: group.goalProgress)
+                    
+                    Text("\(Int(group.goalProgress * 100))%")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(SatsatDesignSystem.Colors.textPrimary)
+                }
                 
-                BitcoinAmountView(
-                    amount: group.currentBalance,
-                    style: .large,
-                    alignment: .center
-                )
+                // Balance info
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Current Balance")
+                        .font(SatsatDesignSystem.Typography.caption)
+                        .foregroundColor(SatsatDesignSystem.Colors.textSecondary)
+                    
+                    BitcoinAmountView(
+                        amount: group.currentBalance,
+                        style: .medium,
+                        alignment: .leading
+                    )
+                    
+                    Text("Goal: \(group.goal.targetAmountSats) sats")
+                        .font(SatsatDesignSystem.Typography.caption)
+                        .foregroundColor(SatsatDesignSystem.Colors.textSecondary)
+                }
+                
+                Spacer()
+            }
+            
+            Divider()
+                .background(SatsatDesignSystem.Colors.backgroundTertiary)
+            
+            // Group Messages Section - Placeholder
+            VStack {
+                Text("Group messaging coming soon")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
         .satsatCard()
@@ -932,21 +971,26 @@ struct CreateGroupView: View {
                 Section {
                     TextField("Enter group name", text: $groupName)
                     
-                    TextField("Goal title", text: $goalTitle)
-                        .placeholder(when: goalTitle.isEmpty) {
-                            Text("e.g. Road Trip 2024")
-                                .foregroundColor(.secondary)
-                        }
-                    
-                    TextField("Goal description", text: $goalDescription, axis: .vertical)
-                        .lineLimit(2...4)
-                        .placeholder(when: goalDescription.isEmpty) {
-                            Text("Describe what you're saving for")
-                                .foregroundColor(.secondary)
-                        }
-                    
                     TextField("Goal amount (sats)", text: $goalAmount)
                         .keyboardType(.numberPad)
+                        .onChange(of: goalAmount) { newValue in
+                            // Filter out non-numeric characters
+                            let filtered = newValue.filter { $0.isNumber }
+                            if filtered != newValue {
+                                goalAmount = filtered
+                            }
+                            
+                            // Add comma formatting
+                            if let number = Int(filtered), number > 0 {
+                                let formatter = NumberFormatter()
+                                formatter.numberStyle = .decimal
+                                if let formatted = formatter.string(from: NSNumber(value: number)) {
+                                    if formatted != goalAmount {
+                                        goalAmount = formatted
+                                    }
+                                }
+                            }
+                        }
                     
                     Picker("Category", selection: $goalCategory) {
                         ForEach(GoalCategory.allCases, id: \.self) { category in
@@ -989,7 +1033,11 @@ struct CreateGroupView: View {
                     Button("Create Group") {
                         createGroup()
                     }
-                    .disabled(groupName.isEmpty || goalTitle.isEmpty || goalAmount.isEmpty || isCreating)
+                    .disabled(groupName.isEmpty || goalAmount.isEmpty || isCreating)
+                    
+                    Text("Note: Multisig wallet will be created once \(selectedThreshold) members have joined the group.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                     
                     if isCreating {
                         HStack {
@@ -1022,7 +1070,12 @@ struct CreateGroupView: View {
     }
     
     private func createGroup() {
-        guard let goalAmountSats = UInt64(goalAmount) else {
+        // Prevent multiple rapid button presses
+        guard !isCreating else { return }
+        
+        // Parse amount removing commas
+        let cleanedAmount = goalAmount.replacingOccurrences(of: ",", with: "")
+        guard let goalAmountSats = UInt64(cleanedAmount) else {
             errorMessage = "Please enter a valid goal amount"
             showingError = true
             return
@@ -1031,14 +1084,21 @@ struct CreateGroupView: View {
         isCreating = true
         
         let goal = GroupGoal(
-            title: goalTitle,
-            description: goalDescription,
+            title: groupName,
+            description: "Group savings goal",
             targetAmountSats: goalAmountSats,
             category: goalCategory
         )
         
         Task {
             do {
+                print("🔍 Creating group with:")
+                print("  - Name: '\(groupName)'")
+                print("  - Goal title: '\(goal.title)'")
+                print("  - Goal description: '\(goal.description)'")
+                print("  - Target amount: \(goal.targetAmountSats)")
+                print("  - Category: \(goal.category)")
+                
                 let _ = try await groupManager.createGroup(
                     name: groupName,
                     goal: goal,
@@ -1054,6 +1114,14 @@ struct CreateGroupView: View {
             } catch {
                 await MainActor.run {
                     isCreating = false
+                    print("❌ Group creation failed with error: \(error)")
+                    print("❌ Error type: \(type(of: error))")
+                    print("❌ Error localized description: \(error.localizedDescription)")
+                    if let nsError = error as? NSError {
+                        print("❌ NSError domain: \(nsError.domain)")
+                        print("❌ NSError code: \(nsError.code)")
+                        print("❌ NSError userInfo: \(nsError.userInfo)")
+                    }
                     errorMessage = error.localizedDescription
                     showingError = true
                 }

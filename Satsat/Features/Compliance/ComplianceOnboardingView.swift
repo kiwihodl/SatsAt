@@ -3,6 +3,10 @@
 
 import SwiftUI
 
+extension Notification.Name {
+    static let complianceOnboardingCompleted = Notification.Name("complianceOnboardingCompleted")
+}
+
 // MARK: - Compliance Onboarding View
 
 struct ComplianceOnboardingView: View {
@@ -66,13 +70,13 @@ struct ComplianceOnboardingView: View {
             Spacer()
             
             // Icon
-            Image(systemName: "graduationcap.fill")
+            Image(systemName: "at.circle.fill")
                 .font(.system(size: 80))
                 .foregroundColor(SatsatDesignSystem.Colors.satsatOrange)
                 .padding(.bottom, SatsatDesignSystem.Spacing.lg)
             
             // Title
-            Text("Educational Purpose")
+            Text("Satsat")
                 .font(SatsatDesignSystem.Typography.largeTitle)
                 .fontWeight(.bold)
                 .foregroundColor(SatsatDesignSystem.Colors.textPrimary)
@@ -80,12 +84,12 @@ struct ComplianceOnboardingView: View {
             
             // Description
             VStack(spacing: SatsatDesignSystem.Spacing.md) {
-                Text("Satsat is designed for learning about Bitcoin and collaborative savings.")
+                Text("Satsat is designed for collaborative Bitcoin savings and group financial goals.")
                     .font(SatsatDesignSystem.Typography.title3)
                     .foregroundColor(SatsatDesignSystem.Colors.textPrimary)
                     .multilineTextAlignment(.center)
                 
-                Text("This app does not sell, exchange, or provide Bitcoin. It teaches Bitcoin concepts through hands-on educational experience.")
+                Text("This app does not sell, exchange, or provide Bitcoin. It helps you save Bitcoin through collaborative group savings.")
                     .font(SatsatDesignSystem.Typography.body)
                     .foregroundColor(SatsatDesignSystem.Colors.textSecondary)
                     .multilineTextAlignment(.center)
@@ -107,7 +111,7 @@ struct ComplianceOnboardingView: View {
                 .padding(.bottom, SatsatDesignSystem.Spacing.lg)
             
             // Title
-            Text("Learning About Bitcoin")
+            Text("Saving With Bitcoin")
                 .font(SatsatDesignSystem.Typography.largeTitle)
                 .fontWeight(.bold)
                 .foregroundColor(SatsatDesignSystem.Colors.textPrimary)
@@ -205,7 +209,7 @@ struct ComplianceOnboardingView: View {
                 .padding(.bottom, SatsatDesignSystem.Spacing.lg)
             
             // Title
-            Text("Ready to Learn?")
+            Text("Ready to Save?")
                 .font(SatsatDesignSystem.Typography.largeTitle)
                 .fontWeight(.bold)
                 .foregroundColor(SatsatDesignSystem.Colors.textPrimary)
@@ -277,7 +281,7 @@ struct ComplianceOnboardingView: View {
             )
             
             // Final disclaimer
-            Text("By proceeding, you acknowledge this is an educational tool for learning Bitcoin concepts.")
+            Text("By proceeding, you acknowledge this is a savings tool for collaborative Bitcoin accumulation.")
                 .font(SatsatDesignSystem.Typography.caption)
                 .foregroundColor(SatsatDesignSystem.Colors.textSecondary)
                 .multilineTextAlignment(.center)
@@ -313,7 +317,7 @@ struct ComplianceOnboardingView: View {
                 }
                 .satsatPrimaryButton()
             } else {
-                Button("Start Learning") {
+                Button("Start Saving") {
                     completeOnboarding()
                     HapticFeedback.success()
                 }
@@ -337,6 +341,9 @@ struct ComplianceOnboardingView: View {
         // Mark onboarding as completed
         UserDefaults.standard.set(true, forKey: "hasCompletedComplianceOnboarding")
         UserDefaults.standard.set(Date(), forKey: "complianceOnboardingDate")
+        
+        // Notify that onboarding is complete
+        NotificationCenter.default.post(name: .complianceOnboardingCompleted, object: nil)
         
         dismiss()
     }

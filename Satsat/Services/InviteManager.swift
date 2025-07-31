@@ -8,6 +8,7 @@ import CoreImage.CIFilterBuiltins
 
 // MARK: - Invite Manager Service
 
+@MainActor
 class InviteManager: ObservableObject {
     static let shared = InviteManager()
     
@@ -22,7 +23,9 @@ class InviteManager: ObservableObject {
     private let keychainManager = KeychainManager.shared
     
     private var cancellables = Set<AnyCancellable>()
-    private let currentUserId = "default_user"
+    private var currentUserId: String {
+        return UserDefaults.standard.string(forKey: "currentUserId") ?? "default_user"
+    }
     
     private init() {
         setupInviteObservers()

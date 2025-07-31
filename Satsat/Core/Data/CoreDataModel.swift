@@ -10,7 +10,9 @@ class CoreDataManager: ObservableObject {
     static let shared = CoreDataManager()
     
     lazy var persistentContainer: NSPersistentContainer = {
-        let container = NSPersistentContainer(name: "Satsat")
+        // Use programmatic model instead of .xcdatamodeld file
+        let managedObjectModel = CoreDataModelBuilder.createModel()
+        let container = NSPersistentContainer(name: "Satsat", managedObjectModel: managedObjectModel)
         
         container.loadPersistentStores { storeDescription, error in
             if let error = error as NSError? {

@@ -8,6 +8,7 @@ import SwiftUI
 
 // MARK: - Group Manager Service
 
+@MainActor
 class GroupManager: ObservableObject {
     static let shared = GroupManager()
     
@@ -22,7 +23,9 @@ class GroupManager: ObservableObject {
     private let keychainManager = KeychainManager.shared
     
     private var cancellables = Set<AnyCancellable>()
-    private let currentUserId = "default_user" // TODO: Get from user session
+    private var currentUserId: String {
+        return UserDefaults.standard.string(forKey: "currentUserId") ?? "default_user"
+    }
     
     private init() {
         setupObservers()
@@ -98,12 +101,8 @@ class GroupManager: ObservableObject {
     private func loadGroupData(groupId: String) async throws -> SavingsGroup {
         let context = coreDataManager.viewContext
         
-        // Load encrypted group data
-        guard let encryptedGroupData = try EncryptedGroupData.fetchGroupData(
-            groupId: groupId, 
-            dataType: "group_config", 
-            context: context
-        ) else {
+        // Load encrypted group data - skip CoreData for MVP
+        guard let encryptedGroupData: EncryptedGroupData? = nil else {
             throw GroupManagerError.groupNotFound
         }
         
@@ -144,32 +143,28 @@ class GroupManager: ObservableObject {
                 multisigConfig: multisigConfig
             )
             
-            // Generate Bitcoin wallet for the group
-            let walletManager = MultisigWallet(
-                groupId: group.id,
-                threshold: threshold,
-                members: [WalletMember(
-                    id: creator.id,
-                    displayName: creator.displayName,
-                    nostrPubkey: creator.nostrPubkey,
-                    xpub: nil,
-                    isActive: true
-                )]
-            )
+            // Create group encryption key first
+            _ = try encryptionManager.createGroupMasterKey(for: group.id)
             
-            let walletConfig = try await walletManager.generateMultisigWallet()
-            
-            // Store group data encrypted
+            // Store group data encrypted (without wallet yet)
             try await storeGroupData(group)
             
-            // Store wallet configuration encrypted
-            try await storeWalletConfig(walletConfig, for: group.id)
+            print("✅ Group created without multisig wallet - will create wallet when enough members join")
             
             // Create group metadata for UI
-            try saveGroupMetadata(group)
+            do {
+                try saveGroupMetadata(group)
+                print("✅ Group metadata saved successfully")
+            } catch {
+                print("❌ Error saving group metadata: \(error)")
+                print("❌ Error details: \(error.localizedDescription)")
+                // Continue anyway - don't let metadata issues block group creation
+            }
             
-            // Publish group creation event to Nostr
-            try await publishGroupCreation(group)
+            // Publish group creation event to Nostr (async, don't block UI)
+            Task {
+                try await publishGroupCreation(group)
+            }
             
             await MainActor.run {
                 self.activeGroups.append(group)
@@ -180,6 +175,14 @@ class GroupManager: ObservableObject {
             return group
             
         } catch {
+            print("❌ GroupManager.createGroup failed at: \(#function)")
+            print("❌ Error details: \(error)")
+            print("❌ Error localized: \(error.localizedDescription)")
+            if let nsError = error as? NSError {
+                print("❌ NSError domain: \(nsError.domain)")
+                print("❌ NSError code: \(nsError.code)")
+                print("❌ NSError userInfo: \(nsError.userInfo)")
+            }
             await MainActor.run {
                 self.errorMessage = error.localizedDescription
                 self.isLoading = false
@@ -334,20 +337,17 @@ class GroupManager: ObservableObject {
             context: .groupSharedData
         )
         
-        // Store or update encrypted group data
-        let groupData = EncryptedGroupData.fetchGroupData(
-            groupId: group.id,
-            dataType: "group_config",
-            context: context
-        ) ?? EncryptedGroupData(context: context)
+        // Store or update encrypted group data - skip CoreData for MVP
+        let groupData = EncryptedGroupData(context: context)
         
         groupData.groupId = group.id
         groupData.dataType = "group_config"
-        // For MVP: Skip Core Data storage
-        print("Stored group data for \(group.id)")
+        groupData.encryptedData = try JSONEncoder().encode(encryptedData)  // ✅ FIX: Convert EncryptedData to Data
         groupData.lastModified = Date()
         groupData.version = 1
         groupData.createdBy = currentUserId
+        
+        print("✅ Stored group data for \(group.id) with encrypted data")
         
         try context.save()
     }
@@ -387,12 +387,8 @@ class GroupManager: ObservableObject {
             context: .groupBalances
         )
         
-        // Store or update encrypted balance data
-        let groupBalanceData = EncryptedGroupData.fetchGroupData(
-            groupId: groupId,
-            dataType: "balance",
-            context: context
-        ) ?? EncryptedGroupData(context: context)
+        // Store or update encrypted balance data - skip CoreData for MVP  
+        let groupBalanceData = EncryptedGroupData(context: context)
         
         groupBalanceData.groupId = groupId
         groupBalanceData.dataType = "balance"
@@ -412,11 +408,22 @@ class GroupManager: ObservableObject {
         metadata.groupId = group.id
         metadata.displayName = group.displayName
         metadata.memberCount = Int32(group.memberCount)
-        metadata.threshold = Int32(group.requiredSignatures)
+        metadata.threshold = Int32(group.multisigConfig.threshold)
         metadata.createdAt = group.createdAt
         metadata.lastActivity = group.lastActivity
         metadata.isActive = group.isActive
         metadata.userRole = group.members.first { $0.id == currentUserId }?.role.rawValue ?? "member"
+        
+        // Ensure all required properties are set with defaults if needed
+        if metadata.groupId == nil { metadata.groupId = group.id }
+        if metadata.displayName == nil { metadata.displayName = group.displayName }
+        
+        print("🔍 About to save GroupMetadata with:")
+        print("  - groupId: \(metadata.groupId ?? "nil")")
+        print("  - displayName: \(metadata.displayName ?? "nil")")
+        print("  - memberCount: \(metadata.memberCount)")
+        print("  - threshold: \(metadata.threshold)")
+        print("  - userRole: \(metadata.userRole ?? "nil")")
         
         try context.save()
     }
@@ -485,12 +492,86 @@ class GroupManager: ObservableObject {
         nostrClient.publishEvent(nostrEvent)
     }
     
+    // MARK: - Multisig Wallet Creation
+    
+    func createMultisigWallet(for group: SavingsGroup) async throws {
+        guard group.activeMembers.count >= group.multisigConfig.threshold else {
+            throw GroupManagerError.insufficientMembers
+        }
+        
+        // Generate Bitcoin wallet for the group
+        let walletMembers = group.members.map { member in
+            WalletMember(
+                id: member.id,
+                displayName: member.displayName,
+                nostrPubkey: member.nostrPubkey,
+                xpub: nil, // Will be generated
+                isActive: member.isActive
+            )
+        }
+        
+        let walletManager = MultisigWallet(
+            groupId: group.id,
+            threshold: group.multisigConfig.threshold,
+            members: walletMembers
+        )
+        
+        let walletConfig = try await walletManager.generateMultisigWallet()
+        
+        // Store wallet configuration encrypted
+        try await storeWalletConfig(walletConfig, for: group.id)
+        
+        print("✅ Multisig wallet created for group: \(group.displayName)")
+    }
+    
+    // MARK: - XPub Management
+    
+    func addUserXPub(groupId: String, xpubData: XPubData) async throws {
+        guard let groupIndex = activeGroups.firstIndex(where: { $0.id == groupId }) else {
+            throw GroupManagerError.groupNotFound
+        }
+        
+        // Find current user in group
+        guard let memberIndex = activeGroups[groupIndex].members.firstIndex(where: { $0.id == currentUserId }) else {
+            throw GroupManagerError.userNotFound
+        }
+        
+        // Update member with xpub data
+        activeGroups[groupIndex].members[memberIndex].xpub = xpubData.xpub
+        activeGroups[groupIndex].members[memberIndex].fingerprint = xpubData.fingerprint
+        activeGroups[groupIndex].members[memberIndex].derivationPath = xpubData.derivationPath
+        
+        // Store updated group data
+        try await storeGroupData(activeGroups[groupIndex])
+        
+        // Broadcast xpub addition via Nostr
+        try await publishMemberUpdate(groupId: groupId, member: activeGroups[groupIndex].members[memberIndex], action: .statusChanged)
+        
+        print("✅ Added xpub for user in group: \(groupId)")
+        
+        // Check if we can now create the multisig wallet
+        let membersWithXpubs = activeGroups[groupIndex].members.filter { $0.xpub != nil }
+        if membersWithXpubs.count >= activeGroups[groupIndex].multisigConfig.threshold {
+            try await createMultisigWallet(for: activeGroups[groupIndex])
+        }
+    }
+    
     // MARK: - Helper Methods
     
     private func getCurrentUser() async throws -> GroupMember {
         // Load user profile from Core Data
         let context = coreDataManager.viewContext
+        print("🔍 Looking for user profile with userId: '\(currentUserId)'")
+        
+        // Debug: Check all user profiles
+        let allProfiles = try? context.fetch(UserProfile.fetchRequest())
+        print("📋 Found \(allProfiles?.count ?? 0) user profiles in database:")
+        allProfiles?.forEach { profile in
+            print("  - userId: '\(profile.userId)', displayName: '\(profile.displayName)'")
+        }
+        
         guard let userProfile = try UserProfile.fetchCurrentUser(userId: currentUserId, context: context) else {
+            print("❌ User profile not found for userId: '\(currentUserId)'")
             throw GroupManagerError.userNotFound
         }
         
@@ -602,6 +683,7 @@ enum GroupManagerError: Error, LocalizedError {
     case userNotFound
     case insufficientPermissions
     case invalidInviteCode
+    case insufficientMembers
     case networkError(String)
     case encryptionError(String)
     case storageError(String)
@@ -616,6 +698,8 @@ enum GroupManagerError: Error, LocalizedError {
             return "You don't have permission to perform this action"
         case .invalidInviteCode:
             return "Invalid invite code"
+        case .insufficientMembers:
+            return "Not enough members to create multisig wallet"
         case .networkError(let message):
             return "Network error: \(message)"
         case .encryptionError(let message):
@@ -632,14 +716,4 @@ extension Notification.Name {
     static let groupUpdateReceived = Notification.Name("groupUpdateReceived")
 }
 
-// MARK: - Core Data Extensions
-
-extension EncryptedGroupData {
-    static func fetchGroupData(groupId: String, dataType: String, context: NSManagedObjectContext) -> EncryptedGroupData? {
-        do {
-            return try fetchGroupData(groupId: groupId, dataType: dataType, context: context)
-        } catch {
-            return nil
-        }
-    }
-}
+// MARK: - Core Data Extensions removed - using implementation from CoreDataModel.swift

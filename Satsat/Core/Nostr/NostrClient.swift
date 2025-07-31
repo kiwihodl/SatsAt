@@ -7,6 +7,7 @@ import SwiftUI
 
 // MARK: - Enhanced Nostr Client
 
+@MainActor
 class NostrClient: ObservableObject {
     static let shared = NostrClient()
     
@@ -31,14 +32,14 @@ class NostrClient: ObservableObject {
     private let maxCacheSize = 1000
     private let connectionTimeout: TimeInterval = 10.0
     
-    // Enhanced relay list with priorities
+    // Enhanced relay list with priorities - using more reliable relays
     private let defaultRelays: [RelayInfo] = [
-        RelayInfo(url: "wss://nos.lol", priority: .high, description: "nos.lol - General"),
         RelayInfo(url: "wss://relay.damus.io", priority: .high, description: "Damus - Popular"),
-        RelayInfo(url: "wss://relay.nostr.band", priority: .medium, description: "Nostr Band - Analytics"),
+        RelayInfo(url: "wss://relay.primal.net", priority: .high, description: "Primal - Reliable"),
+        RelayInfo(url: "wss://nos.lol", priority: .medium, description: "nos.lol - General"),
         RelayInfo(url: "wss://relay.snort.social", priority: .medium, description: "Snort - Social"),
         RelayInfo(url: "wss://nostr.wine", priority: .low, description: "Nostr Wine - Backup"),
-        RelayInfo(url: "wss://relay.current.fyi", priority: .low, description: "Current - Backup")
+        RelayInfo(url: "wss://relay.nostr.band", priority: .low, description: "Nostr Band - Analytics")
     ]
     
     private var cancellables = Set<AnyCancellable>()
@@ -137,18 +138,45 @@ class NostrClient: ObservableObject {
         receiveMessage(from: webSocketTask, relayURL: relayInfo.url)
         
         print("Connecting to relay: \(relayInfo.description)")
+        
+        // Send a minimal connection test - only for our app events
+        let subscriptionId = "satsat_\(UUID().uuidString.prefix(8))"
+        let reqMessage: [Any] = ["REQ", subscriptionId, [
+            "kinds": [1000, 1001, 1002], // Only our custom Satsat events
+            "limit": 0 // Don't fetch any existing events, just test connection
+        ]]
+        
+        do {
+            let messageData = try JSONSerialization.data(withJSONObject: reqMessage)
+            let messageString = String(data: messageData, encoding: .utf8)!
+            let nostrMessage = URLSessionWebSocketTask.Message.string(messageString)
+            
+            webSocketTask.send(nostrMessage) { error in
+                if let error = error {
+                    print("❌ Failed to send connection test to \(relayInfo.url): \(error)")
+                } else {
+                    print("📡 Connection test sent to \(relayInfo.url)")
+                }
+            }
+        } catch {
+            print("❌ Failed to create connection test message: \(error)")
+        }
     }
     
     private func reconnectToRelay(_ relayURL: String, delay: TimeInterval = 5.0) {
-        // Cancel existing reconnection timer
-        reconnectionTimers[relayURL]?.invalidate()
-        
-        let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            self?.attemptReconnection(relayURL)
+        // Cancel existing reconnection timer safely
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.reconnectionTimers[relayURL]?.invalidate()
+            
+            let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+                guard let self = self else { return }
+                self.attemptReconnection(relayURL)
+            }
+            
+            self.reconnectionTimers[relayURL] = timer
+            print("Scheduled reconnection to \(relayURL) in \(delay) seconds")
         }
-        
-        reconnectionTimers[relayURL] = timer
-        print("Scheduled reconnection to \(relayURL) in \(delay) seconds")
     }
     
     private func attemptReconnection(_ relayURL: String) {
@@ -192,6 +220,12 @@ class NostrClient: ObservableObject {
         webSocketTask.receive { [weak self] result in
             switch result {
             case .success(let message):
+                // First successful message indicates connection is established
+                if self?.relayStates[relayURL] == .connecting {
+                    print("✅ Connected to Nostr relay: \(relayURL)")
+                    self?.handleConnectionSuccess(relayURL: relayURL)
+                }
+                
                 switch message {
                 case .string(let text):
                     self?.handleMessage(text: text, relayURL: relayURL)
@@ -289,14 +323,30 @@ class NostrClient: ObservableObject {
     }
     
     private func handleError(error: Error, relayURL: String) {
-        relayStates[relayURL] = .error
+        print("🚨 WebSocket error for \(relayURL): \(error)")
         
-        print("🚨 WebSocket error for \(relayURL): \(error.localizedDescription)")
+        // Safe access to prevent CoreData crashes
+        guard !relayURL.isEmpty else { return }
         
-        // Disconnect and attempt reconnection
-        webSockets[relayURL]?.cancel()
-        webSockets.removeValue(forKey: relayURL)
+        relayStates[relayURL] = .disconnected
         
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.activeRelays.removeAll { $0.url == relayURL }
+            self.isConnected = !self.activeRelays.isEmpty
+            self.updateNetworkHealth()
+            
+            if self.activeRelays.isEmpty {
+                self.connectionStatus = .disconnected
+            }
+        }
+        
+        // Clean up WebSocket reference safely
+        DispatchQueue.main.async { [weak self] in
+            self?.webSockets.removeValue(forKey: relayURL)
+        }
+        
+        // Schedule reconnection with exponential backoff
         let reconnectionDelay = calculateReconnectionDelay(for: relayURL)
         reconnectToRelay(relayURL, delay: reconnectionDelay)
     }
@@ -487,10 +537,6 @@ class NostrClient: ObservableObject {
     
     private func processEvent(_ event: NostrEvent, subscriptionId: String) throws {
         switch event.kind {
-        case 1: // Text note
-            try processTextNote(event)
-        case 4: // Encrypted direct message
-            try processEncryptedDM(event)
         case 1000: // Custom: Group invite
             try processGroupInvite(event)
         case 1001: // Custom: PSBT signing request
@@ -498,7 +544,13 @@ class NostrClient: ObservableObject {
         case 1002: // Custom: Goal update
             try processGoalUpdate(event)
         default:
-            print("Unhandled event kind: \(event.kind)")
+            // Only log if it's a debug subscription that's getting all events
+            if subscriptionId.hasPrefix("satsat_") {
+                // Ignore unhandled events for our app-specific subscriptions
+                return
+            } else {
+                print("Unhandled event kind: \(event.kind)")
+            }
         }
     }
     

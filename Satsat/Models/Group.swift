@@ -108,6 +108,11 @@ class SavingsGroup: ObservableObject, Identifiable, Codable {
         return currentBalance >= goal.targetAmountSats
     }
     
+    var goalProgress: Double {
+        guard goal.targetAmountSats > 0 else { return 0.0 }
+        return min(Double(currentBalance) / Double(goal.targetAmountSats), 1.0)
+    }
+    
     var memberCount: Int {
         return activeMembers.count
     }
@@ -176,15 +181,18 @@ class SavingsGroup: ObservableObject, Identifiable, Codable {
 
 struct GroupMember: Identifiable, Codable, Hashable {
     let id: String
-    var displayName: String
-    var nostrPubkey: String
-    var xpub: String?
-    var role: MemberRole
-    var contributionAmount: UInt64
-    var isActive: Bool
-    var joinedAt: Date
-    var lastSeen: Date
-    var avatarColor: String
+    let displayName: String
+    let nostrPubkey: String
+    let role: MemberRole
+    var isActive: Bool = true
+    var contributionAmount: UInt64 = 0
+    var xpub: String? = nil
+    var fingerprint: String? = nil
+    var derivationPath: String? = nil
+    var lastSeen: Date = Date()
+    
+    // Bitcoin wallet specific
+    var avatarColor: String = "#FF9500"
     
     init(
         id: String = UUID().uuidString,
@@ -200,7 +208,6 @@ struct GroupMember: Identifiable, Codable, Hashable {
         self.role = role
         self.contributionAmount = 0
         self.isActive = true
-        self.joinedAt = Date()
         self.lastSeen = Date()
         self.avatarColor = Self.generateAvatarColor()
     }
@@ -352,11 +359,15 @@ struct MultisigConfig: Codable, Hashable {
     }
     
     var securityLevel: SecurityLevel {
-        switch (threshold, totalSigners) {
-        case (1, _): return .low
-        case (2, 2), (2, 3): return .medium
-        case (3, 3), (3, 4), (3, 5): return .high
-        default: return .medium
+        let percentage = Double(threshold) / Double(totalSigners)
+        
+        switch percentage {
+        case 0.0..<0.5:
+            return .low    // Less than 50% = Low Security (2-of-5 = 40%)
+        case 0.5:
+            return .medium // Exactly 50% = Medium Security (3-of-6 = 50%)
+        default:
+            return .high   // More than 50% = High Security (3-of-5 = 60%+)
         }
     }
 }
@@ -380,9 +391,9 @@ enum SecurityLevel {
     
     var description: String {
         switch self {
-        case .low: return "Basic security"
-        case .medium: return "Good security"
-        case .high: return "High security"
+        case .low: return "Low Security"
+        case .medium: return "Good Security"
+        case .high: return "High Security"
         }
     }
 }

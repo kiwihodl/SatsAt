@@ -21,13 +21,20 @@ class KeychainManager {
     /// Stores data in the keychain with optional biometric protection
     /// Falls back to device passcode if biometrics unavailable/disabled
     func store(data: Data, for key: String, requiresBiometrics: Bool = false) throws {
-        let query: [String: Any] = [
+        // Use simpler keychain storage for iOS Simulator compatibility
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-            kSecAttrAccessControl as String: createAccessControl(requiresBiometrics: requiresBiometrics)
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
+        
+        // Only add access control on physical devices to avoid simulator issues
+        #if !targetEnvironment(simulator)
+        if let accessControl = createAccessControl(requiresBiometrics: requiresBiometrics) {
+            query[kSecAttrAccessControl as String] = accessControl
+        }
+        #endif
         
         // Delete any existing item first
         SecItemDelete(query as CFDictionary)
@@ -41,16 +48,20 @@ class KeychainManager {
     
     /// Retrieves data from the keychain with biometric authentication
     func retrieve(for key: String, prompt: String = "Authenticate to access secure data") throws -> Data {
-        let context = LAContext()
-        context.localizedReason = prompt
-        
-        let query: [String: Any] = [
+        // Simple query for simulator compatibility
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
             kSecReturnData as String: kCFBooleanTrue!,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecUseAuthenticationContext as String: context
+            kSecMatchLimit as String: kSecMatchLimitOne
         ]
+        
+        // Only use authentication context on physical devices
+        #if !targetEnvironment(simulator)
+        let context = LAContext()
+        context.localizedReason = prompt
+        query[kSecUseAuthenticationContext as String] = context
+        #endif
         
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
@@ -146,7 +157,7 @@ class KeychainManager {
     
     // MARK: - Access Control
     
-    private func createAccessControl(requiresBiometrics: Bool) -> SecAccessControl {
+    private func createAccessControl(requiresBiometrics: Bool) -> SecAccessControl? {
         // Always include device passcode as fallback
         var flags: SecAccessControlCreateFlags = [.devicePasscode]
         
@@ -155,12 +166,20 @@ class KeychainManager {
             flags.insert(.biometryAny)
         }
         
-        return SecAccessControlCreateWithFlags(
+        var error: Unmanaged<CFError>?
+        let accessControl = SecAccessControlCreateWithFlags(
             nil,
             kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
             flags,
-            nil
-        )!
+            &error
+        )
+        
+        if let error = error {
+            print("⚠️ Failed to create access control: \(error)")
+            return nil
+        }
+        
+        return accessControl
     }
 }
 
