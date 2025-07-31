@@ -1,0 +1,82 @@
+# Satsat Environment Configuration
+# Copy this file to .env and update with your values
+
+# =============================================================================
+# LIGHTNING NETWORK CONFIGURATION
+# =============================================================================
+
+# Lightning Network Settings
+LIGHTNING_NETWORK=testnet  # Change to 'mainnet' for production
+NWC_ENABLED=true
+
+# NO FALLBACK LIGHTNING NODE - PERFECT COMPLIANCE
+# Users must connect their own Lightning wallets via NWC
+# No custody, no control, no fallback - onchain only for non-Lightning users
+
+# =============================================================================
+# NOSTR CONFIGURATION  
+# =============================================================================
+
+# Default Nostr Relays (comma-separated)
+NOSTR_RELAYS=wss://relay.damus.io,wss://relay.primal.net,wss://relay.snort.social
+
+# Nostr Wallet Connect (NWC) Settings
+NWC_ENABLED=true
+NWC_DEFAULT_RELAY=wss://relay.getalby.com/v1
+
+# =============================================================================
+# APP CONFIGURATION
+# =============================================================================
+
+# App Environment
+ENVIRONMENT=development  # development, staging, production
+
+# Bitcoin Network
+BITCOIN_NETWORK=testnet  # Change to 'mainnet' for production
+
+# App Store Compliance
+APP_STORE_MODE=true  # Enables educational positioning and compliance features
+
+# =============================================================================
+# SECURITY CONFIGURATION
+# =============================================================================
+
+# Encryption
+ENCRYPTION_ENABLED=true
+BIOMETRIC_AUTH_DEFAULT=false  # Users can enable if they want
+
+# =============================================================================
+# DEVELOPMENT SETTINGS
+# =============================================================================
+
+# Debug Logging
+DEBUG_LOGGING=true
+VERBOSE_NOSTR_LOGS=false
+VERBOSE_LIGHTNING_LOGS=false
+
+# Testing
+ENABLE_TEST_RUNNER=true
+MOCK_LIGHTNING_WHEN_NO_NODE=true
+
+# =============================================================================
+# PRODUCTION DEPLOYMENT NOTES
+# =============================================================================
+
+# FOR PRODUCTION:
+# 1. Set ENVIRONMENT=production
+# 2. Set BITCOIN_NETWORK=mainnet  
+# 3. Set LIGHTNING_NETWORK=mainnet
+# 4. Add your real Voltage credentials
+# 5. Set DEBUG_LOGGING=false
+# 6. Set ENABLE_TEST_RUNNER=false
+
+# FOR USERS TO CLONE YOUR APP:
+# 1. No Lightning node setup required - perfect zero-custody compliance
+# 2. Users connect their own Lightning wallets via NWC
+# 3. No Lightning wallet? Onchain Bitcoin only - no fallback
+# 4. Complete privacy - no shared infrastructure anywhere
+
+# LIGHTNING WALLET PRIORITY:
+# 1. User's connected Lightning wallet via NWC (primary)
+# 2. Onchain Bitcoin only (no Lightning fallback - perfect compliance)
+# 3. Mock/demo mode (development only)
