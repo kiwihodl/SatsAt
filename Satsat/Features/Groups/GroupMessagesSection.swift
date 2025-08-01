@@ -73,6 +73,4 @@ struct GroupMessagesSection: View {
     }
 }
 
-// Using MessageBubble from ContentView.swift to avoid duplication
-
-// GroupChatView is defined in ContentView.swift
+// MessageBubble and GroupChatView structs moved to ContentView.swift to avoid duplication

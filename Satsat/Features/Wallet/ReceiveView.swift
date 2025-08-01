@@ -18,18 +18,13 @@ struct ReceiveView: View {
     @State private var isLoading = false
     @State private var showingShareSheet = false
     @State private var copyFeedback = false
-    @State private var showingLightningDeposit = false
-    @State private var showingExternalServices = false
     
     var body: some View {
         NavigationView {
             ScrollView {
                 VStack(spacing: SatsatDesignSystem.Spacing.lg) {
-                    // Header
-                    headerSection
-                    
-                    // Educational disclaimer about external services (App Store compliance)
-                    ExternalServicesView.educationalReceiveMessage()
+                    // Type Selector
+                    typeSelectorSection
                     
                     // QR Code
                     qrCodeSection
@@ -37,22 +32,13 @@ struct ReceiveView: View {
                     // Address Display
                     addressSection
                     
-                    // Address Type Selector
-                    addressTypeSection
-                    
-                    // Action Buttons
-                    actionButtonsSection
-                    
-                    // Instructions
-                    instructionsSection
-                    
                     Spacer(minLength: SatsatDesignSystem.Spacing.xl)
                 }
                 .padding(SatsatDesignSystem.Spacing.md)
             }
-            .background(SatsatDesignSystem.Colors.backgroundPrimary)
-            .navigationTitle("Receive Bitcoin")
+            .background(SatsatDesignSystem.Colors.backgroundSecondary)
             .navigationBarTitleDisplayMode(.inline)
+            .background(SatsatDesignSystem.Colors.backgroundSecondary)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Close") {
@@ -71,6 +57,7 @@ struct ReceiveView: View {
                 }
             }
         }
+        .background(SatsatDesignSystem.Colors.backgroundSecondary)
         .preferredColorScheme(.dark)
         .onAppear {
             generateAddress()
@@ -78,54 +65,38 @@ struct ReceiveView: View {
         .sheet(isPresented: $showingShareSheet) {
             ShareSheet(items: [shareText])
         }
-        .sheet(isPresented: $showingLightningDeposit) {
-            LightningDepositView(group: group)
-                .environmentObject(lightningManager)
-                .environmentObject(groupManager)
-        }
-        .sheet(isPresented: $showingExternalServices) {
-            ExternalServicesView()
-        }
     }
     
     // MARK: - View Sections
     
-    private var headerSection: some View {
+    private var typeSelectorSection: some View {
         VStack(spacing: SatsatDesignSystem.Spacing.sm) {
-            // Group info
-            HStack(spacing: SatsatDesignSystem.Spacing.sm) {
-                SatsatAvatar(
-                    name: group.displayName,
-                    color: "#FF9500",
-                    size: 32
-                )
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(group.displayName)
-                        .font(SatsatDesignSystem.Typography.headline)
-                        .foregroundColor(SatsatDesignSystem.Colors.textPrimary)
-                    
-                    Text("\(group.multisigConfig.displayName) Wallet")
-                        .font(SatsatDesignSystem.Typography.caption)
-                        .foregroundColor(SatsatDesignSystem.Colors.textSecondary)
-                }
+            HStack {
+                Text("Type")
+                    .font(SatsatDesignSystem.Typography.headline)
+                    .foregroundColor(SatsatDesignSystem.Colors.textPrimary)
                 
                 Spacer()
-                
-                SatsatStatusBadge(text: "Secure", style: .success)
             }
             
-            // Current balance
-            VStack(spacing: 4) {
-                Text("Current Balance")
-                    .font(SatsatDesignSystem.Typography.caption)
-                    .foregroundColor(SatsatDesignSystem.Colors.textSecondary)
+            VStack(spacing: SatsatDesignSystem.Spacing.sm) {
+                AddressTypeButton(
+                    type: .multisig,
+                    isSelected: selectedAddressType == .multisig,
+                    group: group
+                ) {
+                    selectedAddressType = .multisig
+                    generateAddress()
+                }
                 
-                BitcoinAmountView(
-                    amount: group.currentBalance,
-                    style: .medium,
-                    alignment: .center
-                )
+                AddressTypeButton(
+                    type: .lightning,
+                    isSelected: selectedAddressType == .lightning,
+                    group: group
+                ) {
+                    selectedAddressType = .lightning
+                    generateAddress()
+                }
             }
         }
         .satsatCard()
@@ -155,7 +126,7 @@ struct ReceiveView: View {
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 200, height: 200)
-                        .background(Color.white)
+                        .background(SatsatDesignSystem.Colors.backgroundSecondary)
                         .cornerRadius(SatsatDesignSystem.Radius.large)
                         .shadow(color: SatsatDesignSystem.Shadows.medium, radius: 8)
                     
@@ -231,147 +202,31 @@ struct ReceiveView: View {
         .satsatCard()
     }
     
-    private var addressTypeSection: some View {
-        VStack(spacing: SatsatDesignSystem.Spacing.sm) {
-            HStack {
-                Text("Address Type")
-                    .font(SatsatDesignSystem.Typography.headline)
-                    .foregroundColor(SatsatDesignSystem.Colors.textPrimary)
-                
-                Spacer()
-            }
-            
-            VStack(spacing: SatsatDesignSystem.Spacing.sm) {
-                AddressTypeButton(
-                    type: .multisig,
-                    isSelected: selectedAddressType == .multisig,
-                    group: group
-                ) {
-                    selectedAddressType = .multisig
-                    generateAddress()
-                }
-                
-                AddressTypeButton(
-                    type: .lightning,
-                    isSelected: selectedAddressType == .lightning,
-                    group: group
-                ) {
-                    selectedAddressType = .lightning
-                    generateAddress()
-                }
-            }
-        }
-        .satsatCard()
-    }
-    
-    private var actionButtonsSection: some View {
-        VStack(spacing: SatsatDesignSystem.Spacing.md) {
-            Button("Copy Address") {
-                copyAddress()
-            }
-            .satsatPrimaryButton()
-            .disabled(generatedAddress.isEmpty)
-            
-            VStack(spacing: SatsatDesignSystem.Spacing.md) {
-                HStack(spacing: SatsatDesignSystem.Spacing.md) {
-                    Button("Share QR Code") {
-                        showingShareSheet = true
-                        HapticFeedback.light()
-                    }
-                    .satsatSecondaryButton()
-                    .disabled(generatedAddress.isEmpty)
-                    
-                    Button("Lightning Deposit") {
-                        showingLightningDeposit = true
-                        HapticFeedback.medium()
-                    }
-                    .satsatSecondaryButton()
-                    .foregroundColor(SatsatDesignSystem.Colors.lightning)
-                }
-                
-                Button("Find Bitcoin Services") {
-                    showingExternalServices = true
-                    HapticFeedback.medium()
-                }
-                .satsatSecondaryButton()
-                .foregroundColor(SatsatDesignSystem.Colors.info)
-            }
-        }
-    }
-    
-    private var instructionsSection: some View {
-        VStack(alignment: .leading, spacing: SatsatDesignSystem.Spacing.sm) {
-            Text("How to Receive Bitcoin")
-                .font(SatsatDesignSystem.Typography.headline)
-                .foregroundColor(SatsatDesignSystem.Colors.textPrimary)
-            
-            VStack(alignment: .leading, spacing: SatsatDesignSystem.Spacing.sm) {
-                InstructionRow(
-                    number: "1",
-                    title: "Share the Address",
-                    description: "Send the Bitcoin address or QR code to the person sending you Bitcoin"
-                )
-                
-                InstructionRow(
-                    number: "2",
-                    title: "Wait for Confirmation",
-                    description: "Bitcoin transactions typically take 10-60 minutes to confirm on the network"
-                )
-                
-                InstructionRow(
-                    number: "3",
-                    title: "Funds Added to Group",
-                    description: "Once confirmed, the Bitcoin will be added to your group's shared wallet"
-                )
-            }
-        }
-        .satsatCard()
-    }
-    
-    // MARK: - Actions
+    // MARK: - Helper Methods
     
     private func generateAddress() {
         isLoading = true
         
-        Task {
-            do {
-                // Simulate address generation
-                try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
-                
-                let address = try await generateBitcoinAddress(type: selectedAddressType)
-                let qrImage = generateQRCode(for: address)
-                
-                await MainActor.run {
-                    self.generatedAddress = address
-                    self.qrCodeImage = qrImage
-                    self.isLoading = false
-                }
-                
-            } catch {
-                await MainActor.run {
-                    self.isLoading = false
-                    // Handle error
-                }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            switch selectedAddressType {
+            case .multisig:
+                generatedAddress = "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"
+            case .lightning:
+                generatedAddress = "lnbc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh"
             }
+            
+            generateQRCode()
+            isLoading = false
         }
     }
     
-    private func generateBitcoinAddress(type: AddressType) async throws -> String {
-        switch type {
-        case .multisig:
-            // Generate multisig address for the group
-            return "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh" // Mock address
-        case .lightning:
-            // Generate Lightning invoice
-            return "lnbc1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypq" // Mock invoice
-        }
-    }
-    
-    private func generateQRCode(for text: String) -> UIImage? {
+    private func generateQRCode() {
+        guard !generatedAddress.isEmpty else { return }
+        
         let context = CIContext()
         let filter = CIFilter.qrCodeGenerator()
         
-        filter.message = Data(text.utf8)
+        filter.message = Data(generatedAddress.utf8)
         filter.correctionLevel = "M"
         
         if let outputImage = filter.outputImage {
@@ -379,11 +234,9 @@ struct ReceiveView: View {
             let scaledImage = outputImage.transformed(by: transform)
             
             if let cgImage = context.createCGImage(scaledImage, from: scaledImage.extent) {
-                return UIImage(cgImage: cgImage)
+                qrCodeImage = UIImage(cgImage: cgImage)
             }
         }
-        
-        return nil
     }
     
     private func copyAddress() {
@@ -406,39 +259,7 @@ struct ReceiveView: View {
     }
 }
 
-// MARK: - Supporting Components
-
-enum AddressType {
-    case multisig, lightning
-    
-    var title: String {
-        switch self {
-        case .multisig: return "Multisig Address"
-        case .lightning: return "Lightning Invoice"
-        }
-    }
-    
-    var description: String {
-        switch self {
-        case .multisig: return "On-chain Bitcoin address for your group wallet"
-        case .lightning: return "Instant payments with lower fees"
-        }
-    }
-    
-    var icon: String {
-        switch self {
-        case .multisig: return "lock.shield"
-        case .lightning: return "bolt.fill"
-        }
-    }
-    
-    var isAvailable: Bool {
-        switch self {
-        case .multisig: return true
-        case .lightning: return false // Coming soon
-        }
-    }
-}
+// MARK: - Address Type Button
 
 struct AddressTypeButton: View {
     let type: AddressType
@@ -448,36 +269,16 @@ struct AddressTypeButton: View {
     
     var body: some View {
         Button(action: action) {
-            HStack(spacing: SatsatDesignSystem.Spacing.md) {
-                // Icon
+            HStack {
                 Image(systemName: type.icon)
                     .font(.title2)
-                    .foregroundColor(type.isAvailable ? SatsatDesignSystem.Colors.satsatOrange : SatsatDesignSystem.Colors.textSecondary)
-                    .frame(width: 32)
+                    .foregroundColor(isSelected ? .white : type.color)
                 
-                // Content
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text(type.title)
-                            .font(SatsatDesignSystem.Typography.headline)
-                            .foregroundColor(type.isAvailable ? SatsatDesignSystem.Colors.textPrimary : SatsatDesignSystem.Colors.textSecondary)
-                        
-                        if !type.isAvailable {
-                            SatsatStatusBadge(text: "Soon", style: .neutral)
-                        }
-                        
-                        Spacer()
-                        
-                        if isSelected && type.isAvailable {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(SatsatDesignSystem.Colors.success)
-                        }
-                    }
-                    
-                    Text(type.description)
-                        .font(SatsatDesignSystem.Typography.caption)
-                        .foregroundColor(SatsatDesignSystem.Colors.textSecondary)
-                        .multilineTextAlignment(.leading)
+                    Text(type.displayName)
+                        .font(SatsatDesignSystem.Typography.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(isSelected ? .white : SatsatDesignSystem.Colors.textPrimary)
                 }
                 
                 Spacer()
@@ -485,55 +286,47 @@ struct AddressTypeButton: View {
             .padding(SatsatDesignSystem.Spacing.md)
             .background(
                 RoundedRectangle(cornerRadius: SatsatDesignSystem.Radius.medium)
-                    .fill(SatsatDesignSystem.Colors.backgroundSecondary)
+                    .fill(isSelected ? SatsatDesignSystem.Colors.satsatOrange : SatsatDesignSystem.Colors.backgroundSecondary)
                     .overlay(
                         RoundedRectangle(cornerRadius: SatsatDesignSystem.Radius.medium)
-                            .stroke(
-                                isSelected && type.isAvailable 
-                                    ? SatsatDesignSystem.Colors.satsatOrange 
-                                    : Color.clear, 
-                                lineWidth: 2
-                            )
+                            .stroke(isSelected ? SatsatDesignSystem.Colors.satsatOrange : SatsatDesignSystem.Colors.backgroundTertiary, lineWidth: 1)
                     )
             )
         }
-        .disabled(!type.isAvailable)
         .buttonStyle(PlainButtonStyle())
     }
 }
 
-struct InstructionRow: View {
-    let number: String
-    let title: String
-    let description: String
+// MARK: - Address Type Enum
+
+enum AddressType: CaseIterable {
+    case multisig
+    case lightning
     
-    var body: some View {
-        HStack(alignment: .top, spacing: SatsatDesignSystem.Spacing.md) {
-            // Number circle
-            Text(number)
-                .font(SatsatDesignSystem.Typography.caption)
-                .fontWeight(.bold)
-                .foregroundColor(.white)
-                .frame(width: 24, height: 24)
-                .background(
-                    Circle()
-                        .fill(SatsatDesignSystem.Colors.satsatOrange)
-                )
-            
-            // Content
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(SatsatDesignSystem.Typography.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundColor(SatsatDesignSystem.Colors.textPrimary)
-                
-                Text(description)
-                    .font(SatsatDesignSystem.Typography.caption)
-                    .foregroundColor(SatsatDesignSystem.Colors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            
-            Spacer()
+    var displayName: String {
+        switch self {
+        case .multisig:
+            return "Bitcoin"
+        case .lightning:
+            return "Lightning"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .multisig:
+            return "bitcoinsign.circle"
+        case .lightning:
+            return "bolt.circle"
+        }
+    }
+    
+    var color: Color {
+        switch self {
+        case .multisig:
+            return SatsatDesignSystem.Colors.satsatOrange
+        case .lightning:
+            return SatsatDesignSystem.Colors.lightning
         }
     }
 }
@@ -549,11 +342,4 @@ struct ShareSheet: UIViewControllerRepresentable {
     }
     
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-}
-
-// MARK: - Preview
-
-#Preview {
-    ReceiveView(group: SavingsGroup.sampleGroup)
-        .environmentObject(GroupManager.shared)
 }

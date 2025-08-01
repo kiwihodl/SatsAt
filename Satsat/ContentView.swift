@@ -27,29 +27,13 @@ struct ContentView: View {
                 }
                 .tag(0)
             
-            // Wallet
-            WalletView()
-                .tabItem {
-                    Image(systemName: "bitcoinsign.circle")
-                    Text("Wallet")
-                }
-                .tag(1)
-            
-            // Messages
-            MessagesView()
-                .tabItem {
-                    Image(systemName: "message.fill")
-                    Text("Messages")
-                }
-                .tag(2)
-            
             // Settings
             SettingsView()
                 .tabItem {
                     Image(systemName: "gear")
                     Text("Settings")
                 }
-                .tag(3)
+                .tag(1)
         }
         .accentColor(.orange)
     }
@@ -64,10 +48,13 @@ struct DashboardView: View {
     @State private var showingCreateGroup = false
     @State private var showingGroupDetail = false
     @State private var selectedGroup: SavingsGroup?
+    @State private var showingWalletDetail = false
+    @State private var selectedWallet: SavingsGroup?
+    @State private var walletSearchText = ""
     
     var body: some View {
         NavigationView {
-            ScrollView {
+            ScrollView(.vertical) {
                 VStack(spacing: 20) {
                     // Header
                     VStack(spacing: 8) {
@@ -102,6 +89,20 @@ struct DashboardView: View {
                         .cornerRadius(12)
                     }
                     
+                    // Manage Groups header
+                    if !groupManager.activeGroups.isEmpty {
+                        Text("Manage Groups")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .padding(.horizontal)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    
+                    // Wallet search and cards section
+                    if !groupManager.activeGroups.isEmpty {
+                        walletCardsSection
+                    }
+                    
                     // Groups list or placeholder
                     if groupManager.activeGroups.isEmpty && !groupManager.isLoading {
                         // Placeholder content
@@ -120,19 +121,7 @@ struct DashboardView: View {
                         }
                         .padding(.top, 40)
                     } else {
-                        // Active groups
-                                            LazyVStack(spacing: 16) {
-                        ForEach(Array(groupManager.activeGroups.enumerated()), id: \.element.id) { index, group in
-                            GroupCard(group: group)
-                                .slideIn(from: .bottom, delay: Double(index) * 0.1)
-                                .scaleOnPress()
-                                .onTapGesture {
-                                    selectedGroup = group
-                                    showingGroupDetail = true
-                                    HapticFeedback.medium()
-                                }
-                        }
-                    }
+                        // Removed duplicate groups list - wallets are now accessible via cards above
                     }
                     
                     if groupManager.isLoading {
@@ -144,6 +133,7 @@ struct DashboardView: View {
                 }
                 .padding()
             }
+            .background(SatsatDesignSystem.Colors.backgroundSecondary)
             .navigationBarHidden(true)
             .refreshable {
                 groupManager.loadGroups()
@@ -158,9 +148,87 @@ struct DashboardView: View {
                 .environmentObject(groupManager)
                 .environmentObject(psbtManager)
         }
+        .sheet(item: $selectedWallet) { wallet in
+            WalletDetailView(group: wallet)
+                .environmentObject(groupManager)
+                .environmentObject(psbtManager)
+        }
         .onAppear {
             if groupManager.activeGroups.isEmpty {
                 groupManager.loadGroups()
+            }
+        }
+    }
+    
+    // MARK: - Wallet Cards Section
+    
+    private var walletCardsSection: some View {
+        VStack(spacing: 16) {
+            // Search bar
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.gray)
+                TextField("Search wallets...", text: $walletSearchText)
+                    .padding()
+                    .background(SatsatDesignSystem.Colors.backgroundSecondary)
+                    .foregroundColor(.white)
+                    .accentColor(.white)
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.white, lineWidth: 1)
+                    )
+                    .onAppear {
+                        // Set placeholder color to white
+                        UITextField.appearance().attributedPlaceholder = NSAttributedString(
+                            string: "Search wallets...",
+                            attributes: [NSAttributedString.Key.foregroundColor: UIColor.white.withAlphaComponent(0.6)]
+                        )
+                    }
+            }
+            .padding(.horizontal)
+            
+            // Filtered wallets
+            let filteredWallets = groupManager.activeGroups.filter { group in
+                walletSearchText.isEmpty || group.displayName.localizedCaseInsensitiveContains(walletSearchText)
+            }
+            
+            if !filteredWallets.isEmpty {
+                if filteredWallets.count == 1 {
+                    // Center single wallet
+                    HStack {
+                        Spacer()
+                        WalletCard(group: filteredWallets[0])
+                            .frame(width: 280, height: 160)
+                            .onTapGesture {
+                                selectedWallet = filteredWallets[0]
+                                showingWalletDetail = true
+                                HapticFeedback.medium()
+                            }
+                        Spacer()
+                    }
+                    .padding(.horizontal)
+                } else {
+                    // Horizontal scroll for multiple wallets
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 16) {
+                            ForEach(filteredWallets) { wallet in
+                                WalletCard(group: wallet)
+                                    .frame(width: 280, height: 160)
+                                    .onTapGesture {
+                                        selectedWallet = wallet
+                                        showingWalletDetail = true
+                                        HapticFeedback.medium()
+                                    }
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                }
+            } else if !walletSearchText.isEmpty {
+                Text("No wallets found")
+                    .foregroundColor(.secondary)
+                    .padding()
             }
         }
     }
@@ -201,6 +269,391 @@ struct ConnectionStatusCard: View {
     }
 }
 
+// MARK: - Wallet Card
+
+struct WalletCard: View {
+    let group: SavingsGroup
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(group.displayName)
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                    
+                    if group.members.count == 1 {
+                        Text("Single Signature")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text(group.multisigConfig.displayName)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("Balance")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Text("\(group.currentBalance) sats")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+                }
+            }
+            
+            Spacer()
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Goal: \(group.goal.targetAmountSats) sats")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                ProgressView(value: Double(group.currentBalance), total: Double(group.goal.targetAmountSats))
+                    .tint(.orange)
+                
+                HStack {
+                    Text("\(Int((Double(group.currentBalance) / Double(group.goal.targetAmountSats)) * 100))% complete")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    Text("\(group.members.count) members")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding()
+        .background(SatsatDesignSystem.Colors.backgroundPrimary)
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color(hex: "#FF9500"), lineWidth: 1)
+        )
+    }
+}
+
+// MARK: - Wallet Detail View
+
+struct WalletDetailView: View {
+    @EnvironmentObject var groupManager: GroupManager
+    @EnvironmentObject var psbtManager: PSBTManager
+    @Environment(\.dismiss) var dismiss
+    // TODO: Implement wallet manager
+    
+    let group: SavingsGroup
+    @State private var showingReceive = false
+    @State private var showingSend = false
+    @State private var showingXPubImport = false
+    
+    private var canTransact: Bool {
+        if group.members.count == 1 {
+            // Single sig: need user's key
+            return group.members.first?.xpub != nil && !group.members.first!.xpub!.isEmpty
+        } else {
+            // Multisig: need all members' keys and wallet created
+            return group.members.allSatisfy { $0.xpub != nil && !$0.xpub!.isEmpty }
+        }
+    }
+    
+    private var canSend: Bool {
+        // Send requires both key import AND non-zero balance
+        return canTransact && group.currentBalance > 0
+    }
+        
+    var body: some View {
+        NavigationView {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 24) {
+                    // Wallet Overview
+                    walletOverviewSection
+                    
+                    // Manage Keys Section
+                    manageKeysSection
+                    
+                    // Quick Actions
+                    quickActionsSection
+                    
+                    // Recent Transactions
+                    recentTransactionsSection
+                    
+                    // Messages Section (only for multi-person groups)
+                    if group.members.count > 1 {
+                        messagesSection
+                    }
+                    
+                    Spacer(minLength: 50)
+                }
+                .padding()
+            }
+            .navigationTitle(group.displayName)
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Back", action: { dismiss() })
+                        .foregroundColor(.orange)
+                }
+            }
+            .onAppear {
+                // TODO: Implement wallet sync
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("groupDataUpdated"))) { notification in
+                if let groupId = notification.object as? String, groupId == group.id {
+                    // Force UI refresh by refreshing the GroupManager which will update the view
+                    print("🔄 Received group data update notification for \(groupId)")
+                    DispatchQueue.main.async {
+                        groupManager.objectWillChange.send()
+                        print("✅ Wallet view refreshed via GroupManager update")
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showingReceive) {
+            ReceiveView(group: group)
+                .environmentObject(groupManager)
+        }
+        .sheet(isPresented: $showingSend) {
+            SendView(group: group)
+                .environmentObject(groupManager)
+                .environmentObject(psbtManager)
+        }
+        .sheet(isPresented: $showingXPubImport) {
+            if let currentMember = group.members.first {
+                XPubImportView(group: group)
+                    .environmentObject(groupManager)
+            } else {
+                Text("Error: No members in group")
+            }
+        }
+    }
+    
+    private var walletOverviewSection: some View {
+        VStack(spacing: 16) {
+            balanceSection
+            progressSection
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+    
+    private var balanceSection: some View {
+        VStack(spacing: 8) {
+            Text("Balance")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
+            Text("\(group.currentBalance) sats")
+                .font(.largeTitle)
+                .fontWeight(.bold)
+                .foregroundColor(.primary)
+        }
+    }
+    
+    private var progressSection: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text("Goal: \(group.goal.targetAmountSats) sats")
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                Spacer()
+                Text("\(Int((Double(group.currentBalance) / Double(group.goal.targetAmountSats)) * 100))%")
+                    .font(.headline)
+                    .fontWeight(.bold)
+                    .foregroundColor(.orange)
+            }
+            
+            ProgressView(value: Double(group.currentBalance), total: Double(group.goal.targetAmountSats))
+                .tint(.orange)
+                .scaleEffect(y: 2)
+        }
+    }
+    
+    private var manageKeysSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Manage Keys")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primary)
+                Spacer()
+            }
+            
+            if group.members.count == 1 {
+                // Single sig key management
+                singleSigKeySection
+            } else {
+                // Multisig key management
+                multisigKeySection
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+    
+    private var singleSigKeySection: some View {
+        VStack(spacing: 12) {
+            if let member = group.members.first, member.xpub != nil && !member.xpub!.isEmpty {
+                // Key uploaded
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text("Single-sig key uploaded")
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                    Spacer()
+                }
+            } else {
+                // Need to upload key
+                HStack {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundColor(.orange)
+                    Text("Upload your hardware wallet key")
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                    Spacer()
+                }
+                
+                Button("Import Key") {
+                    showingXPubImport = true
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+            }
+        }
+    }
+    
+    private var multisigKeySection: some View {
+        VStack(spacing: 12) {
+            ForEach(group.members, id: \.id) { member in
+                HStack {
+                    Circle()
+                        .fill(member.xpub != nil && !member.xpub!.isEmpty ? Color.green : Color.orange)
+                        .frame(width: 12, height: 12)
+                    
+                    Text(member.displayName)
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                    
+                    Spacer()
+                    
+                    if member.xpub != nil && !member.xpub!.isEmpty {
+                        Text("Key uploaded")
+                            .font(.caption)
+                            .foregroundColor(.green)
+                    } else {
+                        Text("Needs key")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
+                }
+            }
+            
+            if !canTransact {
+                Button("Import Your Key") {
+                    showingXPubImport = true
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+            } else {
+                Button("Generate Multisig Wallet") {
+                    // TODO: Implement multisig wallet generation
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+            }
+        }
+    }
+    
+    private var quickActionsSection: some View {
+        VStack(spacing: 16) {
+            // Balance scanning indicator
+            // TODO: Implement wallet syncing indicator
+            
+            HStack(spacing: 16) {
+                Button(action: { showingReceive = true }) {
+                    VStack {
+                        Image(systemName: "qrcode")
+                            .font(.title2)
+                        Text("Receive")
+                            .font(.caption)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(canTransact ? Color.green.opacity(0.2) : Color.gray.opacity(0.2))
+                    .foregroundColor(canTransact ? .green : .gray)
+                    .cornerRadius(12)
+                }
+                .disabled(!canTransact)
+                
+                Button(action: { showingSend = true }) {
+                    VStack {
+                        Image(systemName: "paperplane")
+                            .font(.title2)
+                        Text("Send")
+                            .font(.caption)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(canSend ? Color.orange.opacity(0.2) : Color.gray.opacity(0.2))
+                    .foregroundColor(canSend ? .orange : .gray)
+                    .cornerRadius(12)
+                }
+                .disabled(!canSend)
+            }
+        }
+    }
+    
+    private var recentTransactionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Recent Transactions")
+                .font(.headline)
+                .foregroundColor(.primary)
+            
+            Text("No transactions yet")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(8)
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+    
+    private var messagesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Group Messages")
+                .font(.headline)
+                .foregroundColor(.primary)
+            
+            Text("Recent group messages will appear here")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(8)
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(12)
+    }
+}
+
+
 // MARK: - Placeholder Views
 
 struct WalletView: View {
@@ -238,7 +691,7 @@ struct WalletView: View {
                 .padding()
                 .navigationTitle("Wallet")
             } else {
-                ScrollView {
+                ScrollView(.vertical) {
                     VStack(spacing: SatsatDesignSystem.Spacing.lg) {
                         // Group selector if multiple groups
                         if groupManager.activeGroups.count > 1 {
@@ -263,7 +716,7 @@ struct WalletView: View {
                     }
                     .padding(SatsatDesignSystem.Spacing.md)
                 }
-                .background(SatsatDesignSystem.Colors.backgroundPrimary)
+                .background(SatsatDesignSystem.Colors.backgroundSecondary)
                 .navigationTitle("Wallet")
                 .toolbar {
                     ToolbarItem(placement: .navigationBarTrailing) {
@@ -380,7 +833,7 @@ struct WalletView: View {
             Divider()
                 .background(SatsatDesignSystem.Colors.backgroundTertiary)
             
-            // Progress Circle (Cash App style)
+            // Progress Circle (Satsat style)
             HStack(spacing: SatsatDesignSystem.Spacing.lg) {
                 // Progress Circle
                 ZStack {
@@ -424,11 +877,12 @@ struct WalletView: View {
             Divider()
                 .background(SatsatDesignSystem.Colors.backgroundTertiary)
             
-            // Group Messages Section - Placeholder
+            // Manage Keys Section
             VStack {
-                Text("Group messaging coming soon")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                Text("Manage Keys")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.primary)
             }
         }
         .satsatCard()
@@ -712,7 +1166,7 @@ struct TransactionHistoryView: View {
                         .listRowBackground(SatsatDesignSystem.Colors.backgroundCard)
                 }
             }
-            .background(SatsatDesignSystem.Colors.backgroundPrimary)
+            .background(SatsatDesignSystem.Colors.backgroundSecondary)
             .navigationTitle("Transaction History")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -852,8 +1306,8 @@ struct GroupSelectorButton: View {
                     .fill(group.goal.category.emoji.isEmpty ? Color.orange : Color.clear)
                     .frame(width: 32, height: 32)
                     .overlay(
-                        Text(group.goal.category.emoji.isEmpty ? 
-                             String(group.displayName.prefix(1)).uppercased() : 
+                        Text(group.goal.category.emoji.isEmpty ?
+                             String(group.displayName.prefix(1)).uppercased() :
                              group.goal.category.emoji)
                             .font(.headline)
                     )
@@ -912,6 +1366,7 @@ struct SettingsView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                    .listRowBackground(SatsatDesignSystem.Colors.backgroundSecondary)
                 } header: {
                     Text("Profile")
                 }
@@ -925,6 +1380,7 @@ struct SettingsView: View {
                         Text(biometricAuth.isAvailable ? "Enabled" : "Unavailable")
                             .foregroundColor(.secondary)
                     }
+                    .listRowBackground(SatsatDesignSystem.Colors.backgroundSecondary)
                     
                     HStack {
                         Image(systemName: "lock.fill")
@@ -934,20 +1390,30 @@ struct SettingsView: View {
                         Text("5 minutes")
                             .foregroundColor(.secondary)
                     }
+                    .listRowBackground(SatsatDesignSystem.Colors.backgroundSecondary)
                 } header: {
                     Text("Security")
                 }
                 
                 Section {
                     Text("Satsat v1.0.0")
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.white)
+                        .listRowBackground(SatsatDesignSystem.Colors.backgroundSecondary)
                 } header: {
                     Text("About")
                 }
             }
+            .listStyle(PlainListStyle())
+            .background(SatsatDesignSystem.Colors.backgroundSecondary)
             .navigationTitle("Settings")
         }
+        .background(SatsatDesignSystem.Colors.backgroundSecondary)
     }
+}
+
+enum WalletType: String, CaseIterable {
+    case singleSig = "Single Signature"
+    case multiSig = "Multi Signature"
 }
 
 struct CreateGroupView: View {
@@ -959,8 +1425,9 @@ struct CreateGroupView: View {
     @State private var goalDescription = ""
     @State private var goalAmount = ""
     @State private var goalCategory: GoalCategory = .general
-    @State private var selectedThreshold = 2
-    @State private var maxMembers = 3
+    @State private var selectedThreshold = 1
+    @State private var maxMembers = 1
+    @State private var walletType: WalletType = .singleSig
     @State private var isCreating = false
     @State private var showingError = false
     @State private var errorMessage = ""
@@ -1002,31 +1469,63 @@ struct CreateGroupView: View {
                 }
                 
                 Section {
-                    Picker("Required signatures", selection: $selectedThreshold) {
-                        ForEach(2...maxMembers, id: \.self) { threshold in
-                            Text("\(threshold) of \(maxMembers)")
+                    Picker("Wallet Type", selection: $walletType) {
+                        ForEach(WalletType.allCases, id: \.self) { type in
+                            Text(type.rawValue).tag(type)
                         }
                     }
-                    .onChange(of: maxMembers) { newValue in
-                        if selectedThreshold > newValue {
-                            selectedThreshold = newValue
+                    .onChange(of: walletType) { newType in
+                        switch newType {
+                        case .singleSig:
+                            maxMembers = 1
+                            selectedThreshold = 1
+                        case .multiSig:
+                            maxMembers = 3
+                            selectedThreshold = 2
                         }
                     }
                     
-                    Stepper("Max members: \(maxMembers)", value: $maxMembers, in: 3...9)
+                    if walletType == .multiSig {
+                        Picker("Required signatures", selection: $selectedThreshold) {
+                            ForEach(2...max(2, maxMembers), id: \.self) { threshold in
+                                Text("\(threshold) of \(maxMembers)")
+                            }
+                        }
+                        .onChange(of: maxMembers) { newValue in
+                            let safeMaxMembers = max(2, newValue)
+                            if selectedThreshold < 2 {
+                                selectedThreshold = 2
+                            }
+                            if selectedThreshold > safeMaxMembers {
+                                selectedThreshold = safeMaxMembers
+                            }
+                        }
+                        
+                        Stepper("Max members: \(maxMembers)", value: $maxMembers, in: 3...9)
+                    }
                     
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Security Level: \(MultisigConfig(threshold: selectedThreshold, totalSigners: maxMembers).securityLevel.description)")
-                            .font(.caption)
-                            .foregroundColor(MultisigConfig(threshold: selectedThreshold, totalSigners: maxMembers).securityLevel.color)
-                        
-                        Text("This means \(selectedThreshold) out of \(maxMembers) members must approve every transaction.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        if walletType == .singleSig {
+                            Text("Security Level: Individual Control")
+                                .font(.caption)
+                                .foregroundColor(.blue)
+                            
+                            Text("You have complete control over this single-signature wallet.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("Security Level: \(MultisigConfig(threshold: selectedThreshold, totalSigners: maxMembers).securityLevel.description)")
+                                .font(.caption)
+                                .foregroundColor(MultisigConfig(threshold: selectedThreshold, totalSigners: maxMembers).securityLevel.color)
+                            
+                            Text("This means \(selectedThreshold) out of \(maxMembers) members must approve every transaction.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                     
                 } header: {
-                    Text("Multisig Security")
+                    Text("Security Configuration")
                 }
                 
                 Section {
@@ -1035,9 +1534,15 @@ struct CreateGroupView: View {
                     }
                     .disabled(groupName.isEmpty || goalAmount.isEmpty || isCreating)
                     
-                    Text("Note: Multisig wallet will be created once \(selectedThreshold) members have joined the group.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    if walletType == .singleSig {
+                        Text("Note: Single-signature wallet will be ready for key import after creation.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("Note: Multisig wallet will be created once \(selectedThreshold) members have joined and uploaded keys.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                     
                     if isCreating {
                         HStack {
@@ -1195,8 +1700,8 @@ struct GroupCard: View {
                     .fill(SatsatDesignSystem.Colors.satsatOrange.opacity(0.2))
                     .frame(width: 40, height: 40)
                     .overlay(
-                        Text(group.goal.category.emoji.isEmpty ? 
-                             String(group.displayName.prefix(1)).uppercased() : 
+                        Text(group.goal.category.emoji.isEmpty ?
+                             String(group.displayName.prefix(1)).uppercased() :
                              group.goal.category.emoji)
                             .font(SatsatDesignSystem.Typography.headline)
                     )
@@ -1309,7 +1814,7 @@ struct GroupDetailView: View {
     
     var body: some View {
         NavigationView {
-            ScrollView {
+            ScrollView(.vertical) {
                 VStack(spacing: 24) {
                     // Group header
                     VStack(spacing: 16) {
@@ -1602,7 +2107,7 @@ struct GroupChatView: View {
         VStack(spacing: 0) {
             // Messages list
             ScrollViewReader { proxy in
-                ScrollView {
+                ScrollView(.vertical) {
                     LazyVStack(spacing: 12) {
                         ForEach(messages) { message in
                             MessageBubble(message: message)
@@ -1737,13 +2242,13 @@ struct MessageBubble: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(
-                        message.isFromCurrentUser 
-                            ? Color.orange 
+                        message.isFromCurrentUser
+                            ? Color.orange
                             : Color(.systemGray5)
                     )
                     .foregroundColor(
-                        message.isFromCurrentUser 
-                            ? .white 
+                        message.isFromCurrentUser
+                            ? .white
                             : .primary
                     )
                     .cornerRadius(16)
@@ -1844,8 +2349,8 @@ struct GroupSelectionSheet: View {
                                 .fill(Color.orange.opacity(0.7))
                                 .frame(width: 40, height: 40)
                                 .overlay(
-                                    Text(group.goal.category.emoji.isEmpty ? 
-                                         String(group.displayName.prefix(1)).uppercased() : 
+                                    Text(group.goal.category.emoji.isEmpty ?
+                                         String(group.displayName.prefix(1)).uppercased() :
                                          group.goal.category.emoji)
                                         .font(.headline)
                                         .foregroundColor(.white)

@@ -526,36 +526,6 @@ class GroupManager: ObservableObject {
     
     // MARK: - XPub Management
     
-    func addUserXPub(groupId: String, xpubData: XPubData) async throws {
-        guard let groupIndex = activeGroups.firstIndex(where: { $0.id == groupId }) else {
-            throw GroupManagerError.groupNotFound
-        }
-        
-        // Find current user in group
-        guard let memberIndex = activeGroups[groupIndex].members.firstIndex(where: { $0.id == currentUserId }) else {
-            throw GroupManagerError.userNotFound
-        }
-        
-        // Update member with xpub data
-        activeGroups[groupIndex].members[memberIndex].xpub = xpubData.xpub
-        activeGroups[groupIndex].members[memberIndex].fingerprint = xpubData.fingerprint
-        activeGroups[groupIndex].members[memberIndex].derivationPath = xpubData.derivationPath
-        
-        // Store updated group data
-        try await storeGroupData(activeGroups[groupIndex])
-        
-        // Broadcast xpub addition via Nostr
-        try await publishMemberUpdate(groupId: groupId, member: activeGroups[groupIndex].members[memberIndex], action: .statusChanged)
-        
-        print("✅ Added xpub for user in group: \(groupId)")
-        
-        // Check if we can now create the multisig wallet
-        let membersWithXpubs = activeGroups[groupIndex].members.filter { $0.xpub != nil }
-        if membersWithXpubs.count >= activeGroups[groupIndex].multisigConfig.threshold {
-            try await createMultisigWallet(for: activeGroups[groupIndex])
-        }
-    }
-    
     // MARK: - Helper Methods
     
     private func getCurrentUser() async throws -> GroupMember {
@@ -620,6 +590,72 @@ class GroupManager: ObservableObject {
         print("Received group update")
     }
     
+    // MARK: - XPub Management
+    
+    /// Updates group balance with real blockchain data
+    func updateGroupBalance(_ groupId: String, newBalance: UInt64) async {
+        print("💰 Updating group \(groupId) balance to \(newBalance) sats")
+        
+        guard let groupIndex = activeGroups.firstIndex(where: { $0.id == groupId }) else {
+            print("❌ Group not found for balance update")
+            return
+        }
+        
+        await MainActor.run {
+            activeGroups[groupIndex].currentBalance = newBalance
+            // Force UI refresh
+            objectWillChange.send()
+        }
+    }
+    
+    /// Adds xpub data for a user in a group - PRODUCTION READY IMPLEMENTATION
+    func addUserXPub(groupId: String, xpubData: XPubData) async throws {
+        print("🔑 Adding xpub for user in group \(groupId)")
+        print("🔑 XPub: \(xpubData.xpub.prefix(20))...")
+        print("🔑 Fingerprint: \(xpubData.fingerprint)")
+        print("🔑 Derivation: \(xpubData.derivationPath)")
+        
+        // Find the group in our active groups
+        guard let groupIndex = activeGroups.firstIndex(where: { $0.id == groupId }) else {
+            throw GroupManagerError.groupNotFound
+        }
+        
+        // Find current user in the group
+        let currentUserId = self.currentUserId
+        guard let memberIndex = activeGroups[groupIndex].members.firstIndex(where: { $0.id == currentUserId }) else {
+            throw GroupManagerError.userNotInGroup
+        }
+        
+        // Update member with xpub data
+        activeGroups[groupIndex].members[memberIndex].xpub = xpubData.xpub
+        activeGroups[groupIndex].members[memberIndex].fingerprint = xpubData.fingerprint
+        activeGroups[groupIndex].members[memberIndex].derivationPath = xpubData.derivationPath
+        
+        // Store the updated group data persistently
+        try await storeGroupData(activeGroups[groupIndex])
+        
+        // Check if we can now enable multisig wallet creation
+        let group = activeGroups[groupIndex]
+        let allMembersHaveXPub = group.members.allSatisfy { $0.xpub != nil && !$0.xpub!.isEmpty }
+        
+        if allMembersHaveXPub {
+            if group.members.count == 1 {
+                print("✅ Single-sig key added for individual group \(groupId)")
+            } else if group.members.count >= group.multisigConfig.threshold {
+                print("✅ All members have xpub keys - ready for multisig wallet creation for group \(groupId)")
+                // Notify the UI that multisig generation is now possible
+                await MainActor.run {
+                    NotificationCenter.default.post(
+                        name: .multisigReadyForGeneration,
+                        object: groupId
+                    )
+                }
+            }
+        }
+        
+        print("✅ Added xpub for user \(currentUserId) in group \(groupId)")
+    }
+    
     // MARK: - Simplified methods for MVP
     
     private func parseInviteCode(_ inviteCode: String) throws -> GroupInviteData {
@@ -681,6 +717,7 @@ enum MemberAction: String, Codable {
 enum GroupManagerError: Error, LocalizedError {
     case groupNotFound
     case userNotFound
+    case userNotInGroup
     case insufficientPermissions
     case invalidInviteCode
     case insufficientMembers
@@ -694,6 +731,8 @@ enum GroupManagerError: Error, LocalizedError {
             return "Group not found"
         case .userNotFound:
             return "User profile not found"
+        case .userNotInGroup:
+            return "User is not a member of this group"
         case .insufficientPermissions:
             return "You don't have permission to perform this action"
         case .invalidInviteCode:
@@ -714,6 +753,7 @@ enum GroupManagerError: Error, LocalizedError {
 
 extension Notification.Name {
     static let groupUpdateReceived = Notification.Name("groupUpdateReceived")
+    static let multisigReadyForGeneration = Notification.Name("multisigReadyForGeneration")
 }
 
 // MARK: - Core Data Extensions removed - using implementation from CoreDataModel.swift

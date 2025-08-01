@@ -1,5 +1,5 @@
 // SatsatDesignSystem.swift
-// Cash App-inspired design system for Satsat
+// Satsat design system
 
 import SwiftUI
 
@@ -7,7 +7,7 @@ import SwiftUI
 
 struct SatsatDesignSystem {
     
-    // MARK: - Colors (Cash App Inspired)
+    // MARK: - Colors
     
     struct Colors {
         // Primary Colors

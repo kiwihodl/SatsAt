@@ -217,7 +217,7 @@ struct NWCConnectionView: View {
                 GridItem(.flexible())
             ], spacing: SatsatDesignSystem.Spacing.md) {
                 ForEach(SupportedWallet.allCases, id: \.self) { wallet in
-                    WalletCard(wallet: wallet) {
+                    NWCWalletCard(wallet: wallet) {
                         selectedWallet = wallet
                         // Could open wallet-specific instructions
                     }
@@ -349,7 +349,9 @@ struct ConnectionRow: View {
     }
 }
 
-struct WalletCard: View {
+// MARK: - NWC Wallet Card
+
+struct NWCWalletCard: View {
     let wallet: SupportedWallet
     let action: () -> Void
     

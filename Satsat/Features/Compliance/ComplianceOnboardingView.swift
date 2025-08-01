@@ -183,7 +183,7 @@ struct ComplianceOnboardingView: View {
                 DisclaimerRow(
                     icon: "building.2.crop.circle.fill",
                     title: "External Services Required",
-                    description: "To obtain Bitcoin, you must use external licensed services like Strike, Cash App, or Coinbase."
+                    description: "To obtain Bitcoin, you must use external licensed services like Strike, Coinbase, or other exchanges."
                 )
                 
                 DisclaimerRow(
